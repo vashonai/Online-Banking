@@ -1,16 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-function Header({ onToggleSidebar }) {
+function Header({ onToggleSidebar, user, onLogout }) {
   return (
     <header className="ob-header" role="banner">
       <button className="ob-icon-button" aria-label="Toggle navigation" onClick={onToggleSidebar}>
         ☰
       </button>
-      <h1 className="ob-app-title">MyBank</h1>
+      <h1 className="ob-app-title">MINI CAPSTONE</h1>
       <div className="ob-header-actions" aria-label="User actions">
         <button className="ob-button" aria-label="Notifications">🔔</button>
-        <button className="ob-avatar" aria-label="Account menu" title="Profile">VA</button>
+        {user ? (
+          <div className="ob-user">
+            <span className="ob-subtle" title={user.email}>{user.name}</span>
+            <button className="ob-button ob-button--secondary" onClick={onLogout}>Logout</button>
+          </div>
+        ) : (
+          <span className="ob-subtle">Guest</span>
+        )}
       </div>
     </header>
   )
@@ -44,6 +51,40 @@ function Sidebar({ collapsed, current, onNavigate }) {
   )
 }
 
+function Login({ onLogin, error }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  function submit(e) {
+    e.preventDefault()
+    setLoading(true)
+    setTimeout(() => {
+      onLogin({ email, password })
+      setLoading(false)
+    }, 300)
+  }
+  return (
+    <div className="ob-auth">
+      <form className="ob-card ob-auth-form" onSubmit={submit} autoComplete="on">
+        <div className="ob-card-header">
+          <h2 className="ob-card-title">Sign in</h2>
+        </div>
+        {error && <div role="alert" className="ob-error">{error}</div>}
+        <label className="ob-field">
+          <span>Email</span>
+          <input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </label>
+        <label className="ob-field">
+          <span>Password</span>
+          <input type="password" name="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </label>
+        <button className="ob-button" type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+        <p className="ob-subtle" style={{marginTop: '0.5rem'}}>Demo: test@bank.com / Passw0rd!</p>
+      </form>
+    </div>
+  )
+}
+
 function BalanceCard({ accountName, balance, accountNo }) {
   return (
     <section className="ob-card" aria-label={`Balance ${accountName}`}>
@@ -56,25 +97,45 @@ function BalanceCard({ accountName, balance, accountNo }) {
   )
 }
 
-function RecentTransactions({ transactions }) {
+function RecentTransactions({ transactions, startingBalance }) {
+  const rows = useMemo(() => {
+    let running = startingBalance
+    return transactions.slice(0, 20).map((t) => {
+      running = running + t.amount
+      return { ...t, running }
+    })
+  }, [transactions, startingBalance])
   return (
     <section className="ob-card" aria-label="Recent transactions">
       <div className="ob-card-header">
         <h2 className="ob-card-title">Recent transactions</h2>
       </div>
-      <ul className="ob-tx-list">
-        {transactions.map((t) => (
-          <li key={t.id} className="ob-tx-item">
-            <div className="ob-tx-primary">
-              <span className="ob-tx-merchant">{t.merchant}</span>
-              <span className="ob-subtle">{t.date}</span>
-            </div>
-            <div className={"ob-amount " + (t.amount < 0 ? 'ob-amount--neg' : 'ob-amount--pos')}>
-              {t.amount < 0 ? '-' : '+'}${Math.abs(t.amount).toFixed(2)}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="ob-table-wrap">
+        <table className="ob-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Merchant</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Running balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.id}>
+                <td>{t.date}</td>
+                <td>{t.merchant}</td>
+                <td>{t.amount < 0 ? 'Debit' : 'Credit'}</td>
+                <td className={"ob-amount " + (t.amount < 0 ? 'ob-amount--neg' : 'ob-amount--pos')}>
+                  {t.amount < 0 ? '-' : '+'}${Math.abs(t.amount).toFixed(2)}
+                </td>
+                <td className="ob-amount">${t.running.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
@@ -97,16 +158,63 @@ function QuickActions({ onPay, onTransfer, onAdd }) {
 function App() {
   const [current, setCurrent] = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [user, setUser] = useState(null)
+  const [authError, setAuthError] = useState('')
+  const inactivityTimerRef = useRef(null)
 
-  const accounts = [
+  const [accounts, setAccounts] = useState([
     { id: 'chk', name: 'Checking', number: '••• 1234', balance: 3287.42 },
     { id: 'sav', name: 'Savings', number: '••• 9876', balance: 12045.13 },
-  ]
-  const transactions = [
-    { id: 't1', merchant: 'Grocery Mart', date: 'Oct 5', amount: -54.23 },
-    { id: 't2', merchant: 'Salary', date: 'Oct 4', amount: 2300.0 },
-    { id: 't3', merchant: 'Electric Co', date: 'Oct 3', amount: -89.12 },
-  ]
+  ])
+  const [selectedAccountId, setSelectedAccountId] = useState('chk')
+  const [transactions, setTransactions] = useState([
+    { id: 't1', merchant: 'Grocery Mart', date: '2025-10-05', amount: -54.23 },
+    { id: 't2', merchant: 'Salary', date: '2025-10-04', amount: 2300.0 },
+    { id: 't3', merchant: 'Electric Co', date: '2025-10-03', amount: -89.12 },
+  ])
+
+  // Authentication demo: single valid user
+  function handleLogin({ email, password }) {
+    const valid = email === 'test@bank.com' && password === 'Passw0rd!'
+    if (!valid) {
+      setAuthError('Invalid email or password. Try test@bank.com / Passw0rd!')
+      return
+    }
+    setUser({ name: 'Test User', email })
+    setAuthError('')
+    startInactivityTimer()
+  }
+  function handleLogout(reason) {
+    setUser(null)
+    stopInactivityTimer()
+    if (reason) {
+      alert(reason)
+    }
+  }
+
+  function resetInactivity() {
+    if (!user) return
+    startInactivityTimer()
+  }
+  function startInactivityTimer() {
+    stopInactivityTimer()
+    inactivityTimerRef.current = setTimeout(() => {
+      handleLogout('Session expired due to inactivity.')
+    }, 5 * 60 * 1000) // 5 minutes
+  }
+  function stopInactivityTimer() {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current)
+      inactivityTimerRef.current = null
+    }
+  }
+  useEffect(() => {
+    const events = ['click', 'keydown', 'mousemove', 'touchstart']
+    events.forEach((e) => window.addEventListener(e, resetInactivity))
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, resetInactivity))
+    }
+  }, [user])
 
   function handleNavigate(key) {
     setCurrent(key)
@@ -115,26 +223,42 @@ function App() {
 
   return (
     <div className="ob-app">
-      <Header onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+      <Header onToggleSidebar={() => setSidebarOpen((v) => !v)} user={user} onLogout={() => handleLogout()} />
       <div className="ob-shell">
         <Sidebar collapsed={!sidebarOpen} current={current} onNavigate={handleNavigate} />
         <main className="ob-main" role="main">
-          {current === 'overview' && (
-            <div className="ob-grid">
-              {accounts.map((a) => (
-                <BalanceCard key={a.id} accountName={a.name} accountNo={a.number} balance={a.balance} />
-              ))}
-              <RecentTransactions transactions={transactions} />
-              <QuickActions onPay={() => {}} onTransfer={() => {}} onAdd={() => {}} />
-            </div>
-          )}
-          {current !== 'overview' && (
-            <section className="ob-card">
-              <div className="ob-card-header">
-                <h2 className="ob-card-title">{current[0].toUpperCase() + current.slice(1)}</h2>
-              </div>
-              <p className="ob-subtle">Content coming soon.</p>
-            </section>
+          {!user ? (
+            <Login onLogin={handleLogin} error={authError} />
+          ) : (
+            <>
+              {current === 'overview' && (
+                <div className="ob-grid">
+                  {accounts.map((a) => (
+                    <BalanceCard key={a.id} accountName={a.name} accountNo={a.number} balance={a.balance} />
+                  ))}
+                  <div className="ob-card">
+                    <div className="ob-card-header">
+                      <h2 className="ob-card-title">Account</h2>
+                      <select value={selectedAccountId} onChange={(e) => setSelectedAccountId(e.target.value)}>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name} ({a.number})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <RecentTransactions transactions={transactions} startingBalance={accounts.find(a => a.id === selectedAccountId)?.balance ?? 0} />
+                  </div>
+                  <QuickActions onPay={() => setCurrent('payments')} onTransfer={() => setCurrent('payments')} onAdd={() => {}} />
+                </div>
+              )}
+              {current !== 'overview' && (
+                <section className="ob-card">
+                  <div className="ob-card-header">
+                    <h2 className="ob-card-title">{current[0].toUpperCase() + current.slice(1)}</h2>
+                  </div>
+                  <p className="ob-subtle">Content coming soon.</p>
+                </section>
+              )}
+            </>
           )}
         </main>
       </div>
